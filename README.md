@@ -1,5 +1,7 @@
 # Whisper Diarization
 
+Арендовать север можно на immers-cloud. При этом стоит исопльзовать конфигурацию ubuntu 22.04 с CUDA 12.6. Такая конфигурация попросит 120 Гб диск.
+
 Commands on local computed:
 
 ```bash
