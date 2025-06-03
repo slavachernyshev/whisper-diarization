@@ -1,12 +1,13 @@
 import argparse
+import csv
 import logging
 import os
 import re
+from datetime import timedelta
 
 import faster_whisper
 import torch
 import torchaudio
-
 from ctc_forced_aligner import (
     generate_emissions,
     get_alignments,
@@ -37,16 +38,13 @@ mtypes = {"cpu": "int8", "cuda": "float16"}
 
 # Initialize parser
 parser = argparse.ArgumentParser()
-parser.add_argument(
-    "-a", "--audio", help="name of the target audio file", required=True
-)
+parser.add_argument("-a", "--audio", help="name of the target audio file", required=True)
 parser.add_argument(
     "--no-stem",
     action="store_false",
     dest="stemming",
     default=True,
-    help="Disables source separation."
-    "This helps with long files that don't contain a lot of music.",
+    help="Disables source separation." "This helps with long files that don't contain a lot of music.",
 )
 
 parser.add_argument(
@@ -100,10 +98,7 @@ if args.stemming:
     )
 
     if return_code != 0:
-        logging.warning(
-            "Source splitting failed, using original audio file. "
-            "Use --no-stem argument to disable it."
-        )
+        logging.warning("Source splitting failed, using original audio file. " "Use --no-stem argument to disable it.")
         vocal_target = args.audio
     else:
         vocal_target = os.path.join(
@@ -118,16 +113,10 @@ else:
 
 # Transcribe the audio file
 
-whisper_model = faster_whisper.WhisperModel(
-    args.model_name, device=args.device, compute_type=mtypes[args.device]
-)
+whisper_model = faster_whisper.WhisperModel(args.model_name, device=args.device, compute_type=mtypes[args.device])
 whisper_pipeline = faster_whisper.BatchedInferencePipeline(whisper_model)
 audio_waveform = faster_whisper.decode_audio(vocal_target)
-suppress_tokens = (
-    find_numeral_symbol_tokens(whisper_model.hf_tokenizer)
-    if args.suppress_numerals
-    else [-1]
-)
+suppress_tokens = find_numeral_symbol_tokens(whisper_model.hf_tokenizer) if args.suppress_numerals else [-1]
 
 if args.batch_size > 0:
     transcript_segments, info = whisper_pipeline.transcribe(
@@ -158,9 +147,7 @@ alignment_model, alignment_tokenizer = load_alignment_model(
 
 emissions, stride = generate_emissions(
     alignment_model,
-    torch.from_numpy(audio_waveform)
-    .to(alignment_model.dtype)
-    .to(alignment_model.device),
+    torch.from_numpy(audio_waveform).to(alignment_model.dtype).to(alignment_model.device),
     batch_size=args.batch_size,
 )
 
@@ -229,15 +216,11 @@ if info.language in punct_model_langs:
     model_puncts = ".,;:!?"
 
     # We don't want to punctuate U.S.A. with a period. Right?
-    is_acronym = lambda x: re.fullmatch(r"\b(?:[a-zA-Z]\.){2,}", x)
+    is_acronym = lambda x: re.fullmatch(r"\b(?:[a-zA-Z]\.){2,}", x)  # noqa: E731
 
     for word_dict, labeled_tuple in zip(wsm, labled_words):
         word = word_dict["word"]
-        if (
-            word
-            and labeled_tuple[1] in ending_puncts
-            and (word[-1] not in model_puncts or is_acronym(word))
-        ):
+        if word and labeled_tuple[1] in ending_puncts and (word[-1] not in model_puncts or is_acronym(word)):
             word += labeled_tuple[1]
             if word.endswith(".."):
                 word = word.rstrip(".")
@@ -245,8 +228,7 @@ if info.language in punct_model_langs:
 
 else:
     logging.warning(
-        f"Punctuation restoration is not available for {info.language} language."
-        " Using the original punctuation."
+        f"Punctuation restoration is not available for {info.language} language." " Using the original punctuation."
     )
 
 wsm = get_realigned_ws_mapping_with_punctuation(wsm)
@@ -257,5 +239,33 @@ with open(f"{os.path.splitext(args.audio)[0]}.txt", "w", encoding="utf-8-sig") a
 
 with open(f"{os.path.splitext(args.audio)[0]}.srt", "w", encoding="utf-8-sig") as srt:
     write_srt(ssm, srt)
+
+
+def format_timestamp(ms: int) -> str:
+    """Convert milliseconds to HH:MM:SS.MS format"""
+    td = timedelta(milliseconds=ms)
+    hours = td.seconds // 3600
+    minutes = (td.seconds % 3600) // 60
+    seconds = td.seconds % 60
+    milliseconds = td.microseconds // 1000
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
+
+
+def write_csv(ssm: list, output_file: str):
+    """Write speaker segments to CSV file"""
+    with open(output_file, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["start_time", "end_time", "speaker", "text"])
+        for segment in ssm:
+            start_time = format_timestamp(segment["start_time"])
+            end_time = format_timestamp(segment["end_time"])
+            speaker = segment["speaker"]
+            text = segment["text"].strip()
+            writer.writerow([start_time, end_time, speaker, text])
+
+
+# Replace the existing file writing code with:
+output_base = os.path.splitext(args.audio)[0]
+write_csv(ssm, f"{output_base}.csv")
 
 cleanup(temp_path)

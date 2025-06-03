@@ -5,3 +5,10 @@ __pycache__/
 *.mp3
 *.m4a
 
+audio.wav
+audio.csv
+audio.txt
+audio.srt
+audio.mp3
+interview.mkv
+interview.mp4
